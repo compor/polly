@@ -110,6 +110,16 @@ if (CUDALIB_FOUND)
   INCLUDE_DIRECTORIES( ${CUDALIB_INCLUDE_DIR} )
 endif(CUDALIB_FOUND)
 
+
+find_package(AnnotateLoops CONFIG)
+
+if(AnnotateLoops_FOUND)
+  set(POLLY_USES_ANNOTATELOOPS 1)
+else()
+  message(WARNING "package AnnotateLoops was not found")
+endif()
+
+
 include_directories(
   BEFORE
   ${CMAKE_CURRENT_SOURCE_DIR}/include

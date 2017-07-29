@@ -15,5 +15,6 @@
 
 #cmakedefine CUDALIB_FOUND
 #cmakedefine GPU_CODEGEN
+#cmakedefine POLLY_USES_ANNOTATELOOPS
 
 #endif

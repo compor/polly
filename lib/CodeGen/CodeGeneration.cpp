@@ -31,17 +31,74 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/Debug.h"
 
+#ifdef POLLY_USES_ANNOTATELOOPS
+#include "polly/Options.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/FileSystem.h"
+#include <map>
+#include <string>
+#include <system_error>
+#include "AnnotateLoops.hpp"
+#endif // POLLY_USES_ANNOTATELOOPS
+
 using namespace polly;
 using namespace llvm;
 
 #define DEBUG_TYPE "polly-codegen"
 
+#ifdef POLLY_USES_ANNOTATELOOPS
+static cl::opt<std::string> PollyExportParallelAnnotatedIdLoops(
+    "polly-export-parallel-id-loops",
+    cl::desc("Export ID's of Polly parallel loops"), cl::Optional,
+    cl::cat(PollyCategory));
+#endif // POLLY_USES_ANNOTATELOOPS
+
 namespace {
+
 class CodeGeneration : public ScopPass {
 public:
   static char ID;
 
-  CodeGeneration() : ScopPass(ID) {}
+#ifdef POLLY_USES_ANNOTATELOOPS
+  unsigned int NumTotalScops;
+  unsigned int NumParallelScops;
+  unsigned int NumNonContainingLoopScops;
+  std::map<icsa::AnnotateLoops::LoopID_t, unsigned int> ParallelScops;
+  icsa::AnnotateLoops AL;
+#endif // POLLY_USES_ANNOTATELOOPS
+
+  CodeGeneration() : ScopPass(ID) {
+#ifdef POLLY_USES_ANNOTATELOOPS
+    NumTotalScops = 0;
+    NumParallelScops = 0;
+    NumNonContainingLoopScops = 0;
+
+    return;
+#endif // POLLY_USES_ANNOTATELOOPS
+  }
+
+#ifdef POLLY_USES_ANNOTATELOOPS
+  ~CodeGeneration() override {
+    std::error_code err;
+    llvm::raw_fd_ostream ReportFile(PollyExportParallelAnnotatedIdLoops, err,
+                                    llvm::sys::fs::F_Text);
+
+    if (err) {
+      errs() << "could not open file: \"" << PollyExportParallelAnnotatedIdLoops
+             << "\" reason: " << err.message() << "\n";
+
+      return;
+    }
+
+    ReportFile << NumTotalScops << '\n' << NumNonContainingLoopScops << '\n'
+               << NumParallelScops << '\n' << ParallelScops.size() << '\n';
+
+    for (const auto &e : ParallelScops)
+      ReportFile << e.first << " " << e.second << "\n";
+
+    return;
+  }
+#endif // POLLY_USES_ANNOTATELOOPS
 
   /// @brief The datalayout used
   const DataLayout *DL;
@@ -113,6 +170,41 @@ public:
     PollyIRBuilder Builder = createPollyIRBuilder(EnteringBB, Annotator);
 
     IslNodeBuilder NodeBuilder(Builder, Annotator, this, *DL, *LI, *SE, *DT, S);
+
+#ifdef POLLY_USES_ANNOTATELOOPS
+    NumTotalScops++;
+
+    if (PollyExportParallelAnnotatedIdLoops.size() && AI->isParallel(AstRoot)) {
+      NumParallelScops++;
+
+      std::set<Loop *> TopLoops;
+
+      for (BasicBlock *bb : S.getRegion().blocks()) {
+        Loop *TopLoop = LI->getLoopFor(bb);
+
+        while (TopLoop && TopLoop->getParentLoop())
+          TopLoop = TopLoop->getParentLoop();
+
+        if (TopLoop)
+          TopLoops.insert(TopLoop);
+      }
+
+      if (!TopLoops.size())
+        NumNonContainingLoopScops++;
+      else
+        for (const auto *e : TopLoops) {
+          if (AL.hasAnnotatedId(*e)) {
+            auto id = AL.getAnnotatedId(*e);
+            auto found = ParallelScops.find(id);
+
+            if (found == ParallelScops.end())
+              found = ParallelScops.emplace(id, 0).first;
+
+            found->second++;
+          }
+        }
+    }
+#endif // POLLY_USES_ANNOTATELOOPS
 
     // Only build the run-time condition and parameters _after_ having
     // introduced the conditional branch. This is important as the conditional

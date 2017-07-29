@@ -215,6 +215,10 @@ add_polly_loadable_module(LLVMPolly
   Polly.cpp
 )
 
+if(AnnotateLoops_FOUND)
+  target_link_libraries(Polly LLVMAnnotateLoopsPass)
+endif()
+
 if (TARGET intrinsics_gen)
   # Check if we are building as part of an LLVM build
   add_dependencies(Polly intrinsics_gen)
