@@ -67,6 +67,8 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/Debug.h"
 #include <set>
+#include <fstream>
+#include <string>
 
 using namespace llvm;
 using namespace polly;
@@ -89,6 +91,11 @@ static cl::opt<bool> DetectUnprofitable("polly-detect-unprofitable",
                                         cl::desc("Detect unprofitable scops"),
                                         cl::Hidden, cl::init(false),
                                         cl::ZeroOrMore, cl::cat(PollyCategory));
+
+static cl::opt<std::string>
+    FunctionBlacklistFile("polly-func-blacklist",
+                          cl::desc("Do not process these functions"),
+                          cl::Optional, cl::cat(PollyCategory));
 
 static cl::opt<std::string> OnlyFunction(
     "polly-only-func",
@@ -170,6 +177,8 @@ bool polly::PollyTrackFailures = false;
 bool polly::PollyDelinearize = false;
 StringRef polly::PollySkipFnAttr = "polly.skip.fn";
 
+static std::set<std::string> FunctionBlacklist;
+
 //===----------------------------------------------------------------------===//
 // Statistics.
 
@@ -229,6 +238,18 @@ ScopDetection::ScopDetection() : FunctionPass(ID) {
     DEBUG(errs() << "WARNING: We disable runtime alias checks as non affine "
                     "accesses are enabled.\n");
     PollyUseRuntimeAliasChecks = false;
+  }
+
+  if (FunctionBlacklistFile != "") {
+    std::ifstream BlacklistFile{FunctionBlacklistFile};
+
+    if (BlacklistFile.is_open()) {
+      std::string Line;
+      while (std::getline(BlacklistFile, Line))
+        FunctionBlacklist.insert(Line);
+    } else
+      DEBUG(errs() << "could not open file: \'" << FunctionBlacklistFile
+                   << "\'\n");
   }
 }
 
@@ -1027,6 +1048,9 @@ bool ScopDetection::runOnFunction(llvm::Function &F) {
   Region *TopRegion = RI->getTopLevelRegion();
 
   releaseMemory();
+
+  if (FunctionBlacklistFile != "" && FunctionBlacklist.count(F.getName()))
+    return false;
 
   if (OnlyFunction != "" && !F.getName().count(OnlyFunction))
     return false;
