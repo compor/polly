@@ -50,6 +50,7 @@ if (NOT DEFINED LLVM_MAIN_SRC_DIR)
         "${UNITTEST_DIR}/googlemock"
         )
       target_link_libraries(gtest PUBLIC -lpthread)
+      target_link_libraries(gtest PUBLIC LLVMSupport)
 
       add_library(gtest_main ${UNITTEST_DIR}/UnitTestMain/TestMain.cpp)
       target_link_libraries(gtest_main PUBLIC gtest)
