@@ -34,6 +34,7 @@ namespace llvm {
 
 class PassRegistry;
 class raw_ostream;
+class OptimizationRemarkEmitter;
 
 void initializeIslAstInfoWrapperPassPass(PassRegistry &);
 } // namespace llvm
@@ -59,10 +60,13 @@ public:
   IslAst &operator=(IslAst &&) = delete;
   ~IslAst();
 
-  static IslAst create(Scop &Scop, const Dependences &D);
+  static IslAst create(Scop &Scop, const Dependences &D,
+                       OptimizationRemarkEmitter *ORE = nullptr);
 
   /// Print a source code representation of the program.
   void pprint(raw_ostream &OS);
+
+  const Scop &getScop() const { return S; }
 
   __isl_give isl_ast_node *getAst();
 
@@ -88,7 +92,7 @@ private:
 
   IslAst(Scop &Scop);
 
-  void init(const Dependences &D);
+  void init(const Dependences &D, OptimizationRemarkEmitter *ORE = nullptr);
 };
 
 class IslAstInfo {
@@ -130,7 +134,9 @@ private:
   IslAst Ast;
 
 public:
-  IslAstInfo(Scop &S, const Dependences &D) : S(S), Ast(IslAst::create(S, D)) {}
+  IslAstInfo(Scop &S, const Dependences &D,
+             OptimizationRemarkEmitter *ORE = nullptr)
+      : S(S), Ast(IslAst::create(S, D, ORE)) {}
 
   /// Return the isl AST computed by this IslAstInfo.
   IslAst &getIslAst() { return Ast; }

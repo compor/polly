@@ -37,6 +37,7 @@
 #include "polly/ScopPass.h"
 #include "polly/Support/GICHelper.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
@@ -515,6 +516,52 @@ static void walkAstForStatistics(__isl_keep isl_ast_node *Ast) {
       nullptr);
 }
 
+static OptimizationRemarkEmitter *gORE = nullptr;
+static IslAst *gAst = nullptr;
+
+static void walkAstForRemarks(__isl_keep isl_ast_node *AstNode, IslAst &Ast,
+                              OptimizationRemarkEmitter *ORE) {
+  if (!ORE) {
+    return;
+  }
+
+  // FIXME: non-thread-safe hack
+  gORE = ORE;
+  gAst = &Ast;
+
+  assert(AstNode);
+  isl_ast_node_foreach_descendant_top_down(
+      AstNode,
+      [](__isl_keep isl_ast_node *Node, void *User) -> isl_bool {
+        switch (isl_ast_node_get_type(Node)) {
+        case isl_ast_node_for:
+          if (IslAstInfo::isParallel(Node)) {
+            auto &S = gAst->getScop();
+            auto *LI = S.getLI();
+            auto *entry = S.getEntry();
+
+            if (LI && entry) {
+              auto *L = LI->getLoopFor(entry);
+              auto Begin = L->getStartLoc();
+              gORE->emit(OptimizationRemarkAnalysis(DEBUG_TYPE, "AstNodeTypes",
+                                                    Begin, L->getHeader())
+                         << "This SCoP contains a parallel loop.");
+            }
+          }
+          break;
+        default:
+          break;
+        }
+
+        // Continue traversing subtrees.
+        return isl_bool_true;
+      },
+      nullptr);
+
+  gORE = nullptr;
+  gAst = nullptr;
+}
+
 IslAst::IslAst(Scop &Scop) : S(Scop), Ctx(Scop.getSharedIslCtx()) {}
 
 IslAst::IslAst(IslAst &&O)
@@ -528,7 +575,7 @@ IslAst::~IslAst() {
   isl_ast_expr_free(RunCondition);
 }
 
-void IslAst::init(const Dependences &D) {
+void IslAst::init(const Dependences &D, OptimizationRemarkEmitter *ORE) {
   bool PerformParallelTest = PollyParallel || DetectParallel ||
                              PollyVectorizerChoice != VECTORIZER_NONE;
 
@@ -582,13 +629,15 @@ void IslAst::init(const Dependences &D) {
 
   Root = isl_ast_build_node_from_schedule(Build, S.getScheduleTree().release());
   walkAstForStatistics(Root);
+  walkAstForRemarks(Root, *this, ORE);
 
   isl_ast_build_free(Build);
 }
 
-IslAst IslAst::create(Scop &Scop, const Dependences &D) {
+IslAst IslAst::create(Scop &Scop, const Dependences &D,
+                      OptimizationRemarkEmitter *ORE) {
   IslAst Ast{Scop};
-  Ast.init(D);
+  Ast.init(D, ORE);
   return Ast;
 }
 
@@ -794,6 +843,7 @@ PreservedAnalyses IslAstPrinterPass::run(Scop &S, ScopAnalysisManager &SAM,
                                          ScopStandardAnalysisResults &SAR,
                                          SPMUpdater &U) {
   auto &Ast = SAM.getResult<IslAstAnalysis>(S, SAR);
+
   Ast.print(OS);
   return PreservedAnalyses::all();
 }
@@ -809,6 +859,7 @@ bool IslAstInfoWrapperPass::runOnScop(Scop &Scop) {
 
   const Dependences &D =
       getAnalysis<DependenceInfo>().getDependences(Dependences::AL_Statement);
+  auto &ORE = getAnalysis<OptimizationRemarkEmitterWrapperPass>().getORE();
 
   if (D.getSharedIslCtx() != Scop.getSharedIslCtx()) {
     LLVM_DEBUG(
@@ -817,7 +868,7 @@ bool IslAstInfoWrapperPass::runOnScop(Scop &Scop) {
     return false;
   }
 
-  Ast.reset(new IslAstInfo(Scop, D));
+  Ast.reset(new IslAstInfo(Scop, D, &ORE));
 
   LLVM_DEBUG(printScop(dbgs(), Scop));
   return false;
@@ -828,6 +879,7 @@ void IslAstInfoWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
   ScopPass::getAnalysisUsage(AU);
   AU.addRequiredTransitive<ScopInfoRegionPass>();
   AU.addRequired<DependenceInfo>();
+  AU.addRequired<OptimizationRemarkEmitterWrapperPass>();
 
   AU.addPreserved<DependenceInfo>();
 }
@@ -848,5 +900,6 @@ INITIALIZE_PASS_BEGIN(IslAstInfoWrapperPass, "polly-ast",
                       false);
 INITIALIZE_PASS_DEPENDENCY(ScopInfoRegionPass);
 INITIALIZE_PASS_DEPENDENCY(DependenceInfo);
+INITIALIZE_PASS_DEPENDENCY(OptimizationRemarkEmitterWrapperPass);
 INITIALIZE_PASS_END(IslAstInfoWrapperPass, "polly-ast",
                     "Polly - Generate an AST from the SCoP (isl)", false, false)
