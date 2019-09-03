@@ -539,9 +539,9 @@ static void walkAstForRemarks(__isl_keep isl_ast_node *AstNode, IslAst &Ast,
             auto &S = gAst->getScop();
             auto *LI = S.getLI();
             auto *entry = S.getEntry();
+            auto *L = LI->getLoopFor(entry);
 
-            if (LI && entry) {
-              auto *L = LI->getLoopFor(entry);
+            if (L && LI && entry) {
               auto Begin = L->getStartLoc();
               gORE->emit(OptimizationRemarkAnalysis(DEBUG_TYPE, "AstNodeTypes",
                                                     Begin, L->getHeader())
