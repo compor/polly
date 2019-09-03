@@ -533,24 +533,50 @@ static void walkAstForRemarks(__isl_keep isl_ast_node *AstNode, IslAst &Ast,
   isl_ast_node_foreach_descendant_top_down(
       AstNode,
       [](__isl_keep isl_ast_node *Node, void *User) -> isl_bool {
-        switch (isl_ast_node_get_type(Node)) {
-        case isl_ast_node_for:
-          if (IslAstInfo::isParallel(Node)) {
-            auto &S = gAst->getScop();
-            auto *LI = S.getLI();
-            auto *entry = S.getEntry();
-            auto *L = LI->getLoopFor(entry);
+        auto &S = gAst->getScop();
+        auto *entry = S.getEntry();
+        auto *LI = S.getLI();
+        auto L = LI->getLoopFor(entry);
 
-            if (L && LI && entry) {
-              auto Begin = L->getStartLoc();
-              gORE->emit(OptimizationRemarkAnalysis(DEBUG_TYPE, "AstNodeTypes",
-                                                    Begin, L->getHeader())
-                         << "This SCoP contains a parallel loop.");
+        if (L && entry) {
+          auto Begin = L->getStartLoc();
+          std::string Remark = "";
+
+          switch (isl_ast_node_get_type(Node)) {
+          case isl_ast_node_for:
+            if (IslAstInfo::isParallel(Node)) {
+              Remark += "This SCoP contains a parallel loop";
+              std::string Details = " ";
+
+              if (IslAstInfo::isInnermostParallel(Node)) {
+                Details += "innermost ";
+              }
+              if (IslAstInfo::isOutermostParallel(Node)) {
+                Details += "outermost ";
+              }
+              if (IslAstInfo::isReductionParallel(Node)) {
+                Details += "reduction ";
+              }
+              if (IslAstInfo::isExecutedInParallel(Node)) {
+                Details += "parallelexecution ";
+              }
+
+              if (Details != " ") {
+                Remark += " (" + Details + ")";
+              }
             }
+
+            break;
+          default:
+            break;
           }
-          break;
-        default:
-          break;
+
+          if (Remark != "") {
+            Remark += ".";
+            gORE->emit(OptimizationRemarkAnalysis(DEBUG_TYPE, "AstNodeTypes",
+                                                  Begin, L->getHeader())
+                       << Remark);
+          }
         }
 
         // Continue traversing subtrees.
