@@ -538,6 +538,17 @@ static void walkAstForRemarks(__isl_keep isl_ast_node *AstNode, IslAst &Ast,
         auto *LI = S.getLI();
         auto L = LI->getLoopFor(entry);
 
+        for (BasicBlock *bb : S.getRegion().blocks()) {
+          Loop *TopLoop = LI->getLoopFor(bb);
+
+          while (TopLoop && TopLoop->getParentLoop())
+            TopLoop = TopLoop->getParentLoop();
+
+          if (TopLoop) {
+            L = TopLoop;
+          }
+        }
+
         if (L && entry) {
           auto Begin = L->getStartLoc();
           std::string Remark = "";
